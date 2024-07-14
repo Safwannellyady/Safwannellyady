@@ -1,0 +1,74 @@
+const express = require('express');
+const mongoose = require('mongoose');
+const passport = require('passport');
+const session = require('express-session');
+const bodyParser = require('body-parser');
+const LocalStrategy = require('passport-local').Strategy;
+const bcrypt = require('bcryptjs');
+
+const app = express();
+
+// Connect to MongoDB
+mongoose.connect('mongodb://localhost/my-web-app', { useNewUrlParser: true, useUnifiedTopology: true });
+
+// User Schema and Model
+const UserSchema = new mongoose.Schema({
+    username: String,
+    password: String,
+    profileImage: String
+});
+const User = mongoose.model('User', UserSchema);
+
+// Middleware
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(session({ secret: 'your-secret-key', resave: false, saveUninitialized: false }));
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Passport Local Strategy
+passport.use(new LocalStrategy(async (username, password, done) => {
+    const user = await User.findOne({ username });
+    if (!user) return done(null, false, { message: 'Incorrect username.' });
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return done(null, false, { message: 'Incorrect password.' });
+    return done(null, user);
+}));
+
+passport.serializeUser((user, done) => {
+    done(null, user.id);
+});
+
+passport.deserializeUser((id, done) => {
+    User.findById(id, (err, user) => {
+        done(err, user);
+    });
+});
+
+// Set up EJS for templating
+app.set('view engine', 'ejs');
+
+// Routes
+app.get('/', (req, res) => res.render('index'));
+app.get('/login', (req, res) => res.render('login'));
+app.get('/register', (req, res) => res.render('register'));
+app.get('/dashboard', (req, res) => {
+    if (!req.isAuthenticated()) {
+        return res.redirect('/login');
+    }
+    res.render('dashboard', { user: req.user });
+});
+
+app.post('/register', async (req, res) => {
+    const { username, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = new User({ username, password: hashedPassword, profileImage: '/images/profile-placeholder.png' });
+    await newUser.save();
+    res.redirect('/login');
+});
+
+app.post('/login', passport.authenticate('local', {
+    successRedirect: '/dashboard',
+    failureRedirect: '/login'
+}));
+
+app.listen(3000, () => console.log('Server started on port 3000'));
